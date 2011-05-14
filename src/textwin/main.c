@@ -19,6 +19,7 @@ void	keyboardthread(void*);
 void	waitthread(void*);
 void	xfidallocthread(void*);
 void	newwindowthread(void*);
+void	selchangethread(void*);
 void	plumbproc(void*);
 int	timefmt(Fmt*);
 
@@ -36,18 +37,35 @@ enum{
 };
 Rune	snarfrune[NSnarf+1];
 
-char		*fontnames[2] =
+char* srvname;
+char* prtname = "textwin";
+char* fontnames[2] =
 {
-	"/lib/font/bit/lucsans/euro.8.font",
-	"/lib/font/bit/lucm/unicode.9.font"
+	"/lib/font/bit/fixed/unicode.6x13.font",
+	"/lib/font/bit/luc/unicode.8.font"
 };
 
 Command *command;
 
-void	shutdownthread(void*);
-void	acmeerrorinit(void);
-void	readfile(Column*, char*);
-static int	shutdown(void*, char*);
+/* Do we need to some hacks to get fancy graphics to work?  */
+int fancygfx = 0; 
+
+void shutdownthread(void*);
+void textwinerrorinit(void);
+void readfile(Column*, char*);
+static int shutdown(void*, char*);
+
+char*
+getsrvname()
+{
+	return srvname;
+}
+
+char*
+getprtname()
+{
+	return prtname;
+}
 
 void
 derror(Display *d, char *errorstr)
@@ -60,14 +78,16 @@ void
 threadmain(int argc, char *argv[])
 {
 	int i;
-	char *p, *loadfile;
+	char *p, *e, *loadfile;
 	Column *c;
 	int ncol;
+	int empty;
 	Display *d;
 
 	rfork(RFENVG|RFNAMEG);
 
 	ncol = -1;
+	empty = 0;
 
 	loadfile = nil;
 	ARGBEGIN{
@@ -90,6 +110,9 @@ threadmain(int argc, char *argv[])
 		if(ncol <= 0)
 			goto Usage;
 		break;
+	case 'e':
+		empty = 1;
+		break;
 	case 'f':
 		fontnames[0] = ARGF();
 		if(fontnames[0] == nil)
@@ -110,6 +133,11 @@ threadmain(int argc, char *argv[])
 		if(mtpt == nil)
 			goto Usage;
 		break;
+	case 'p':
+		prtname = ARGF();
+		if(prtname == nil)
+			goto Usage;
+		break;
 	case 'r':
 		swapscrollbuttons = TRUE;
 		break;
@@ -120,12 +148,13 @@ threadmain(int argc, char *argv[])
 		break;
 	default:
 	Usage:
-		fprint(2, "usage: acme -a -c ncol -f fontname -F fixedwidthfontname -l loadfile -W winsize\n");
+		fprint(2, "usage: textwin -a -c ncol -f font -F altfont -l loadfile -p portname -s srvname -W winsize\n");
 		threadexitsall("usage");
 	}ARGEND
 
-	fontnames[0] = estrdup(fontnames[0]);
-	fontnames[1] = estrdup(fontnames[1]);
+	srvname = smprint("textwin.%d", getppid());
+	e = getenv("°°fixfont"); fontnames[0] = e ? estrdup(e) : estrdup(fontnames[0]); free(e);
+	e = getenv("°°varfont"); fontnames[1] = e ? estrdup(e) : estrdup(fontnames[1]); free(e);
 
 	quotefmtinstall();
 	fmtinstall('t', timefmt);
@@ -143,24 +172,29 @@ threadmain(int argc, char *argv[])
 	if(loadfile)
 		rowloadfonts(loadfile);
 	putenv("font", fontnames[0]);
+	putenv("textwin", srvname);
 	snarffd = open("/dev/snarf", OREAD|OCEXEC);
 /*
 	if(cputype){
-		sprint(buf, "/acme/bin/%s", cputype);
+		sprint(buf, "/textwin/bin/%s", cputype);
 		bind(buf, "/bin", MBEFORE);
 	}
-	bind("/acme/bin", "/bin", MBEFORE);
+	bind("/textwin/bin", "/bin", MBEFORE);
 */
 	getwd(wdir, sizeof wdir);
 
 /*
-	if(geninitdraw(nil, derror, fontnames[0], "acme", nil, Refnone) < 0){
-		fprint(2, "acme: can't open display: %r\n");
+	if(geninitdraw(nil, derror, fontnames[0], "textwin", nil, Refnone) < 0){
+		fprint(2, "textwin: can't open display: %r\n");
 		threadexitsall("geninitdraw");
 	}
 */
-	if(initdraw(derror, fontnames[0], "acme") < 0){
-		fprint(2, "acme: can't open display: %r\n");
+
+	/* we need HUE's Xtreeeeme!!!1! devdraw */
+	putenv("DEVDRAW", "d3vdr4w"); 
+
+	if(initdraw(derror, fontnames[0], "textwin") < 0){
+		fprint(2, "textwin: can't open display: %r\n");
 		threadexitsall("initdraw");
 	}
 
@@ -190,10 +224,16 @@ threadmain(int argc, char *argv[])
 	cedit = chancreate(sizeof(int), 0);
 	cexit = chancreate(sizeof(int), 0);
 	cwarn = chancreate(sizeof(void*), 1);
-	if(cwait==nil || ccommand==nil || ckill==nil || cxfidalloc==nil || cxfidfree==nil || cerr==nil || cexit==nil || cwarn==nil){
-		fprint(2, "acme: can't create initial channels: %r\n");
+	cselchange = chancreate(sizeof(SelectionChange), 0);
+
+	if(cwait==nil || ccommand==nil || ckill==nil || 
+	   cxfidalloc==nil || cxfidfree==nil || cerr==nil ||
+	   cexit==nil || cwarn==nil || cselchange ==nil)
+	{
+		fprint(2, "textwin: can't create initial channels: %r\n");
 		threadexitsall("channels");
 	}
+
 	chansetname(ccommand, "ccommand");
 	chansetname(ckill, "ckill");
 	chansetname(cxfidalloc, "cxfidalloc");
@@ -203,35 +243,31 @@ threadmain(int argc, char *argv[])
 	chansetname(cedit, "cedit");
 	chansetname(cexit, "cexit");
 	chansetname(cwarn, "cwarn");
+	chansetname(cselchange, "cselchange");
 
 	mousectl = initmouse(nil, screen);
 	if(mousectl == nil){
-		fprint(2, "acme: can't initialize mouse: %r\n");
+		fprint(2, "textwin: can't initialize mouse: %r\n");
 		threadexitsall("mouse");
 	}
 	mouse = &mousectl->m;
 	keyboardctl = initkeyboard(nil);
 	if(keyboardctl == nil){
-		fprint(2, "acme: can't initialize keyboard: %r\n");
+		fprint(2, "textwin: can't initialize keyboard: %r\n");
 		threadexitsall("keyboard");
 	}
 	mainpid = getpid();
 	startplumbing();
-/*
-	plumbeditfd = plumbopen("edit", OREAD|OCEXEC);
-	if(plumbeditfd < 0)
-		fprint(2, "acme: can't initialize plumber: %r\n");
-	else{
-		cplumb = chancreate(sizeof(Plumbmsg*), 0);
-		threadcreate(plumbproc, nil, STACK);
-	}
-	plumbsendfd = plumbopen("send", OWRITE|OCEXEC);
-*/
-
 	fsysinit();
 
 	#define	WPERCOL	8
 	disk = diskinit();
+	hiddentext.what = Hidden;
+	textinit(&hiddentext,
+		fileaddtext(nil, &hiddentext),
+		screen->clipr,
+		rfget(FALSE, FALSE, FALSE, nil),
+		textcols);
 	if(!loadfile || !rowload(&row, loadfile, TRUE)){
 		rowinit(&row, screen->clipr);
 		if(ncol < 0){
@@ -251,26 +287,29 @@ threadmain(int argc, char *argv[])
 				error("initializing columns");
 		}
 		c = row.col[row.ncol-1];
-		if(argc == 0)
-			readfile(c, wdir);
-		else
-			for(i=0; i<argc; i++){
-				p = utfrrune(argv[i], '/');
-				if((p!=nil && strcmp(p, "/guide")==0) || i/WPERCOL>=row.ncol)
-					readfile(c, argv[i]);
-				else
-					readfile(row.col[i/WPERCOL], argv[i]);
-			}
+		if(!empty) {
+			if(argc == 0)
+				readfile(c, wdir);
+			else
+				for(i=0; i<argc; i++){
+					p = utfrrune(argv[i], '/');
+					if((p!=nil && strcmp(p, "/guide")==0) || i/WPERCOL>=row.ncol)
+						readfile(c, argv[i]);
+					else
+						readfile(row.col[i/WPERCOL], argv[i]);
+				}
+		}
 	}
 	flushimage(display, 1);
 
-	acmeerrorinit();
+	textwinerrorinit();
 	threadcreate(keyboardthread, nil, STACK);
 	threadcreate(mousethread, nil, STACK);
 	threadcreate(waitthread, nil, STACK);
 	threadcreate(xfidallocthread, nil, STACK);
 	threadcreate(newwindowthread, nil, STACK);
 /*	threadcreate(shutdownthread, nil, STACK); */
+	threadcreate(selchangethread, nil, STACK);
 	threadnotify(shutdown, 1);
 	recvul(cexit);
 	killprocs();
@@ -339,7 +378,7 @@ shutdown(void *v, char *msg)
 	for(i=0; oknotes[i]; i++)
 		if(strncmp(oknotes[i], msg, strlen(oknotes[i])) == 0)
 			threadexitsall(msg);
-	print("acme: %s\n", msg);
+	print("textwin: %s\n", msg);
 	return 0;
 }
 
@@ -376,13 +415,13 @@ static int errorfd;
 int erroutfd;
 
 void
-acmeerrorproc(void *v)
+textwinerrorproc(void *v)
 {
 	char *buf;
 	int n;
 
 	USED(v);
-	threadsetname("acmeerrorproc");
+	threadsetname("textwinerrorproc");
 	buf = emalloc(8192+1);
 	while((n=read(errorfd, buf, 8192)) >= 0){
 		buf[n] = '\0';
@@ -391,35 +430,19 @@ acmeerrorproc(void *v)
 }
 
 void
-acmeerrorinit(void)
+textwinerrorinit(void)
 {
 	int pfd[2];
 
 	if(pipe(pfd) < 0)
 		error("can't create pipe");
-#if 0
-	sprint(acmeerrorfile, "/srv/acme.%s.%d", getuser(), mainpid);
-	fd = create(acmeerrorfile, OWRITE, 0666);
-	if(fd < 0){
-		remove(acmeerrorfile);
-  		fd = create(acmeerrorfile, OWRITE, 0666);
-		if(fd < 0)
-			error("can't create acmeerror file");
-	}
-	sprint(buf, "%d", pfd[0]);
-	write(fd, buf, strlen(buf));
-	close(fd);
-	/* reopen pfd[1] close on exec */
-	sprint(buf, "/fd/%d", pfd[1]);
-	errorfd = open(buf, OREAD|OCEXEC);
-#endif
 	fcntl(pfd[0], F_SETFD, FD_CLOEXEC);
 	fcntl(pfd[1], F_SETFD, FD_CLOEXEC);
 	erroutfd = pfd[0];
 	errorfd = pfd[1];
 	if(errorfd < 0)
-		error("can't re-open acmeerror file");
-	proccreate(acmeerrorproc, nil, STACK);
+		error("can't re-open textwinerror file");
+	proccreate(textwinerrorproc, nil, STACK);
 }
 
 /*
@@ -504,13 +527,14 @@ keyboardthread(void *v)
 void
 mousethread(void *v)
 {
-	Text *t, *argt;
-	int but;
+	Text *t;
+	int but, chord;
 	uint q0, q1;
+	Column *c;
 	Window *w;
 	Plumbmsg *pm;
 	Mouse m;
-	char *act;
+	char *srvname, *act;
 	enum { MResize, MMouse, MPlumb, MWarnings, NMALT };
 	static Alt alts[NMALT+1];
 
@@ -546,7 +570,12 @@ mousethread(void *v)
 			rowresize(&row, screen->clipr);
 			break;
 		case MPlumb:
-			if(strcmp(pm->type, "text") == 0){
+			srvname = plumblookup(pm->attr, "srvname");
+			if(srvname != nil && strcmp(srvname, getsrvname()) != 0)
+			{
+				/* ignore the message */
+			}
+			else if(strcmp(pm->type, "text") == 0){
 				act = plumblookup(pm->attr, "action");
 				if(act==nil || strcmp(act, "showfile")==0)
 					plumblook(pm);
@@ -613,6 +642,15 @@ mousethread(void *v)
 				winunlock(w);
 				goto Continue;
 			}
+			if(t->what == Rowtag && but) {
+				c = rowwhichcolscroll(&row, m.xy);
+				if(c)
+				{
+					rowdragcol(&row, c, but);
+					activecol = c;
+					goto Continue;
+				}
+			} 
 			if(ptinrect(m.xy, t->scrollr)){
 				if(but){
 					if(t->what == Columntag)
@@ -646,11 +684,17 @@ mousethread(void *v)
 					if(t->w!=nil && t==&t->w->body)
 						activewin = t->w;
 				}else if(m.buttons & 2){
-					if(textselect2(t, &q0, &q1, &argt))
-						execute(t, q0, q1, FALSE, argt);
+					chord = textselect2(t, &q0, &q1);
+					if(chord == 2)
+						execute(t, q0, q1, FALSE, nil);
+					else if(chord == 1)
+					{
+						getxselarg(&hiddentext);
+						execute(t, q0, q1, FALSE, &hiddentext);							
+					}
 				}else if(m.buttons & 4){
-					if(textselect3(t, &q0, &q1))
-						look3(t, q0, q1, FALSE);
+					chord = textselect3(t, &q0, &q1);
+
 				}
 				if(w)
 					winunlock(w);
@@ -866,6 +910,37 @@ newwindowthread(void *v)
 	}
 }
 
+void
+selchangethread(void* v)
+{
+	SelectionChange sc;
+	threadsetname("selchangethread");
+	for(;;)
+	{
+		recv(cselchange, &sc);
+		if(sc.selectionID != latestselectionid)
+			continue;
+		Text* t = latestselectiontext;
+		/*if(t->q0 == t->q1)
+			continue;*/
+		if(sc.ndata == 0)
+		{
+			textdelete(t, t->q0, t->q1, TRUE); 
+		}
+		else
+		{
+			int nb, nr;
+			Rune* r = runemalloc(sc.ndata+1);
+			cvttorunes(sc.data, sc.ndata, r, &nb, &nr, nil);
+			r[nr] = '\0';
+			textinsert(t, t->q1, r, nr, TRUE);
+			textsetselect(t, t->q0, t->q1 + nr);
+			flushimage(display, 1);
+			free(r);
+		}
+	}
+}
+
 Reffont*
 rfget(int fix, int save, int setfont, char *name)
 {
@@ -955,20 +1030,160 @@ iconinit(void)
 {
 	Rectangle r;
 	Image *tmp;
+	char *s;
+	int i;
 
-	/* Blue */
-	tagcols[BACK] = allocimagemix(display, DPalebluegreen, DWhite);
-	tagcols[HIGH] = allocimage(display, Rect(0,0,1,1), screen->chan, 1, DPalegreygreen);
-	tagcols[BORD] = allocimage(display, Rect(0,0,1,1), screen->chan, 1, DPurpleblue);
-	tagcols[TEXT] = display->black;
-	tagcols[HTEXT] = display->black;
+	char* bgimagename = getenv("°°bgimage");
+	if(bgimagename)
+	{
+		fancygfx = 1;
 
-	/* Yellow */
-	textcols[BACK] = allocimagemix(display, DPaleyellow, DWhite);
-	textcols[HIGH] = allocimage(display, Rect(0,0,1,1), screen->chan, 1, DDarkyellow);
-	textcols[BORD] = allocimage(display, Rect(0,0,1,1), screen->chan, 1, DYellowgreen);
-	textcols[TEXT] = display->black;
-	textcols[HTEXT] = display->black;
+		int fd = open(bgimagename, OREAD);
+		if(fd < 0)
+			sysfatal("can't open background image %s: %r", bgimagename);
+
+		Image* img = readimage(display, fd, 0);
+
+		close(fd);
+
+		r = Rect(0, 0, img->r.max.x, img->r.max.y);
+
+		s = getenv("°°bgcolor");
+		if(s)
+		{
+			i = strtol(s,nil,0);
+			i = 0x000000FF | (i << 8);
+			textcols[BACK] = allocimage(display, r, screen->chan, 2, i);
+			draw(textcols[BACK], img->r, img, textcols[BACK], ZP);
+			textcols[HTEXT] = allocimage(display, r, screen->chan, 2, i);
+			draw(textcols[HTEXT], img->r, img, textcols[HTEXT], ZP);
+			free(s);	
+		}
+		else 
+		{
+			textcols[BACK] = allocimage(display, Rect(0,0,1,1), screen->chan, 1, 0xFFFFFFFF);
+			textcols[HTEXT] = display->black;
+		}
+
+		s = getenv("°°fgcolor");
+		if(s)
+		{
+			i = strtol(s,nil,0);
+			i = 0x000000FF | (i << 8);
+			textcols[HIGH] = allocimage(display, Rect(0,0,1,1), screen->chan, 1, i);
+			textcols[BORD] = allocimage(display, Rect(0,0,1,1), screen->chan, 1, i);
+			textcols[TEXT] = allocimage(display, Rect(0,0,1,1), screen->chan, 1, i);
+			free(s);	
+		}
+		else 
+		{
+			textcols[HIGH] = allocimage(display, Rect(0,0,1,1), screen->chan, 1, 0x808080FF);
+			textcols[BORD] = allocimage(display, Rect(0,0,1,1), screen->chan, 1, 0x808080FF);
+			textcols[TEXT] = allocimage(display, Rect(0,0,1,1), screen->chan, 1, 0x808080FF);
+		}
+	
+		s = getenv("°°textwin_tag_bgcolor");
+		if(s)
+		{
+			i = strtol(s,nil,0);
+			i = 0x000000FF | (i << 8);
+			tagcols[BACK] = allocimage(display, r, screen->chan, 2, i);
+			draw(tagcols[BACK], img->r, img, tagcols[BACK], ZP);
+			tagcols[HTEXT] = allocimage(display, r, screen->chan, 2, i);
+			draw(tagcols[HTEXT], img->r, img, tagcols[HTEXT], ZP);
+			free(s);	
+		}
+		else 
+		{
+			tagcols[BACK] = allocimage(display, Rect(0,0,1,1), screen->chan, 1, 0xE0E0FFFF);
+			tagcols[HTEXT] = display->black;
+		}
+	
+		s = getenv("°°textwin_tag_fgcolor");
+		if(s)
+		{
+			i = strtol(s,nil,0);
+			i = 0x000000FF | (i << 8);
+			tagcols[HIGH] = allocimage(display, Rect(0,0,1,1), screen->chan, 1, i);
+			tagcols[BORD] = allocimage(display, Rect(0,0,1,1), screen->chan, 1, i);
+			tagcols[TEXT] = allocimage(display, Rect(0,0,1,1), screen->chan, 1, i);
+			free(s);	
+		}
+		else 
+		{
+			tagcols[HIGH] = allocimage(display, Rect(0,0,1,1), screen->chan, 1, DPalegreygreen);
+			tagcols[BORD] = allocimage(display, Rect(0,0,1,1), screen->chan, 1, 0x000000FF);
+			tagcols[TEXT] = allocimage(display, Rect(0,0,1,1), screen->chan, 1, 0x000000FF);
+		}
+
+		freeimage(img);
+	}
+	else
+	{
+		s = getenv("°°bgcolor");
+		if(s)
+		{
+			i = strtol(s,nil,0);
+			i = 0x000000FF | (i << 8);
+			textcols[BACK] = allocimage(display, Rect(0,0,1,1), screen->chan, 1, i);
+			textcols[HTEXT] = allocimage(display, Rect(0,0,1,1), screen->chan, 1, i);
+			free(s);	
+		}
+		else 
+		{
+			textcols[BACK] = allocimage(display, Rect(0,0,1,1), screen->chan, 1, 0xFFFFFFFF);
+			textcols[HTEXT] = display->black;
+		}
+
+		s = getenv("°°fgcolor");
+		if(s)
+		{
+			i = strtol(s,nil,0);
+			i = 0x000000FF | (i << 8);
+			textcols[HIGH] = allocimage(display, Rect(0,0,1,1), screen->chan, 1, i);
+			textcols[BORD] = allocimage(display, Rect(0,0,1,1), screen->chan, 1, i);
+			textcols[TEXT] = allocimage(display, Rect(0,0,1,1), screen->chan, 1, i);
+			free(s);	
+		}
+		else 
+		{
+			textcols[HIGH] = allocimage(display, Rect(0,0,1,1), screen->chan, 1, 0x808080FF);
+			textcols[BORD] = allocimage(display, Rect(0,0,1,1), screen->chan, 1, 0x808080FF);
+			textcols[TEXT] = allocimage(display, Rect(0,0,1,1), screen->chan, 1, 0x808080FF);
+		}
+	
+		s = getenv("°°textwin_tag_bgcolor");
+		if(s)
+		{
+			i = strtol(s,nil,0);
+			i = 0x000000FF | (i << 8);
+			tagcols[BACK] = allocimage(display, Rect(0,0,1,1), screen->chan, 1, i);
+			tagcols[HTEXT] = allocimage(display, Rect(0,0,1,1), screen->chan, 1, i);
+			free(s);	
+		}
+		else 
+		{
+			tagcols[BACK] = allocimage(display, Rect(0,0,1,1), screen->chan, 1, 0xE0E0FFFF);
+			tagcols[HTEXT] = display->black;
+		}
+	
+		s = getenv("°°textwin_tag_fgcolor");
+		if(s)
+		{
+			i = strtol(s,nil,0);
+			i = 0x000000FF | (i << 8);
+			tagcols[HIGH] = allocimage(display, Rect(0,0,1,1), screen->chan, 1, i);
+			tagcols[BORD] = allocimage(display, Rect(0,0,1,1), screen->chan, 1, i);
+			tagcols[TEXT] = allocimage(display, Rect(0,0,1,1), screen->chan, 1, i);
+			free(s);	
+		}
+		else 
+		{
+			tagcols[HIGH] = allocimage(display, Rect(0,0,1,1), screen->chan, 1, DPalegreygreen);
+			tagcols[BORD] = allocimage(display, Rect(0,0,1,1), screen->chan, 1, 0x000000FF);
+			tagcols[TEXT] = allocimage(display, Rect(0,0,1,1), screen->chan, 1, 0x000000FF);
+		}
+	}
 
 	if(button){
 		freeimage(button);
@@ -993,7 +1208,7 @@ iconinit(void)
 	freeimage(tmp);
 
 	r = button->r;
-	colbutton = allocimage(display, r, screen->chan, 0, DPurpleblue);
+	colbutton = allocimage(display, r, screen->chan, 0, 0x000000FF);
 
 	but2col = allocimage(display, r, screen->chan, 1, 0xAA0000FF);
 	but3col = allocimage(display, r, screen->chan, 1, 0x006600FF);
@@ -1010,7 +1225,7 @@ iconinit(void)
 #define MAXSNARF 100*1024
 
 void
-acmeputsnarf(void)
+textwinputsnarf(void)
 {
 	int i, n;
 	Fmt f;
@@ -1037,7 +1252,7 @@ acmeputsnarf(void)
 }
 
 void
-acmegetsnarf(void)
+textwingetsnarf(void)
 {
 	char *s;
 	int nb, nr, nulls, len;
@@ -1056,6 +1271,39 @@ acmegetsnarf(void)
 	bufinsert(&snarfbuf, 0, r, nr);
 	free(r);
 	free(s);
+}
+
+void
+updatelabel()
+{
+	int i,j;
+	Column *c;
+	Window *w;
+	char *newlabel, *tmp, *tag, *spc;
+
+	newlabel = smprint("textwin: ");
+	for(i=0; i<row.ncol; i++){
+		c = row.col[i];
+		for(j=0; j<c->nw; j++){
+			w = c->w[j];
+			tag = runetobyte(w->tag.file->b.c, w->tag.file->b.nc);
+			spc = strchr(tag, ' ');
+			if(spc) 
+				*++spc = '\0';
+			if(!strstr(newlabel, tag))
+			{
+				tmp = smprint("%s %s", newlabel, tag);
+				free(newlabel);
+				newlabel = tmp;
+			}
+			free(tag);
+		}
+	}
+	tmp = smprint("%s [%s]", newlabel, getsrvname());
+	free(newlabel);
+	newlabel = tmp;
+	drawsetlabel(newlabel);
+	free(newlabel);
 }
 
 int

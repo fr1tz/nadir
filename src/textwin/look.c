@@ -38,7 +38,7 @@ plumbthread(void *v)
 		 * Connect to plumber.
 		 */
 		plumbunmount();
-		while((fid = plumbopenfid("edit", OREAD|OCEXEC)) == nil){
+		while((fid = plumbopenfid(getprtname(), OREAD|OCEXEC)) == nil){
 			t = timerstart(2000);
 			recv(t->c, nil);
 			timerstop(t);
@@ -79,7 +79,7 @@ startplumbing(void)
 
 
 void
-look3(Text *t, uint q0, uint q1, int external)
+look3(Text *t, uint q0, uint q1, int external, int noplumb)
 {
 	int n, c, f, expanded;
 	Text *ct;
@@ -100,7 +100,7 @@ look3(Text *t, uint q0, uint q1, int external)
 			return;
 		f = 0;
 		if((e.u.at!=nil && t->w!=nil) || (e.nname>0 && lookfile(e.name, e.nname)!=nil))
-			f = 1;		/* acme can do it without loading a file */
+			f = 1;		/* textwin can do it without loading a file */
 		if(q0!=e.q0 || q1!=e.q1)
 			f |= 2;	/* second (post-expand) message follows */
 		if(e.nname)
@@ -141,10 +141,10 @@ look3(Text *t, uint q0, uint q1, int external)
 		free(r);
 		goto Return;
 	}
-	if(plumbsendfid != nil){
+	if(!noplumb && plumbsendfid != nil){
 		/* send whitespace-delimited word to plumber */
 		m = emalloc(sizeof(Plumbmsg));
-		m->src = estrdup("acme");
+		m->src = estrdup("textwin");
 		m->dst = nil;
 		dir = dirname(t, nil, 0);
 		if(dir.nr==1 && dir.r[0]=='.'){	/* sigh */

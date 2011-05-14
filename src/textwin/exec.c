@@ -687,19 +687,6 @@ putfile(File *f, int q0, int q1, Rune *namer, int nname)
 			w->dirty = TRUE;
 			f->unread = TRUE;
 		}else{
-			// In case the file is on NFS, reopen the fd
-			// before dirfstat to cause the attribute cache
-			// to be updated (otherwise the mtime in the
-			// dirfstat below will be stale and not match
-			// what NFS sees).  The file is already written,
-			// so this should be a no-op when not on NFS.
-			// Opening for OWRITE (but no truncation)
-			// in case we don't have read permission.
-			// (The create above worked, so we probably
-			// still have write permission.)
-			close(fd);
-			fd = open(name, OWRITE);
-
 			d1 = dirfstat(fd);
 			if(d1 != nil){
 				free(d);
@@ -841,7 +828,7 @@ cut(Text *et, Text *t, Text *_0, int dosnarf, int docut, Rune *_2, int _3)
 			q0 += n;
 		}
 		fbuffree(r);
-		acmeputsnarf();
+		textwinputsnarf();
 	}
 	if(docut){
 		textdelete(t, t->q0, t->q1, TRUE);
@@ -875,7 +862,7 @@ paste(Text *et, Text *t, Text *_0, int selectall, int tobody, Rune *_1, int _2)
 	if(t == nil)
 		return;
 
-	acmegetsnarf();
+	textwingetsnarf();
 	if(t==nil || snarfbuf.nc==0)
 		return;
 	if(t->w!=nil && et->w!=t->w){
@@ -1051,7 +1038,7 @@ id(Text *et, Text *_0, Text *_1, int _2, int _3, Rune *_4, int _5)
 	USED(_5);
 
 	if(et && et->w)
-		warning(nil, "/mnt/acme/%d/\n", et->w->id);
+		warning(nil, "/mnt/textwin.%d/%d/\n", getpid(), et->w->id);
 }
 
 void
@@ -1427,8 +1414,8 @@ runproc(void *argvp)
 			threadexits("fsysmount");
 		}
 		sprint(buf, "%d", c->md->id);
-		if((fs = nsmount("acme", buf)) == nil){
-			fprint(2, "child: can't mount acme: %r\n");
+		if((fs = nsmount(getsrvname(), buf)) == nil){
+			fprint(2, "child: can't mount textwin: %r\n");
 			fsysdelid(c->md);
 			c->md = nil;
 			threadexits("nsmount");
@@ -1574,11 +1561,12 @@ Hard:
 		chdir(dir);	/* ignore error: probably app. window */
 		free(dir);
 	}
-	rcarg[0] = "rc";
+	rcarg[0] = getenv("SHELL");
 	rcarg[1] = "-c";
 	rcarg[2] = t;
 	rcarg[3] = nil;
 	ret = threadspawn(sfd, rcarg[0], rcarg);
+	free(rcarg[0]);
 	if(olddir >= 0){
 		fchdir(olddir);
 		close(olddir);

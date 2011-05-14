@@ -13,11 +13,12 @@
 #include "fns.h"
 
 static Rune Lcolhdr[] = {
-	'N', 'e', 'w', 'c', 'o', 'l', ' ',
+	'|', ' ', 'N', 'e', 'w', ' ',
 	'K', 'i', 'l', 'l', ' ',
 	'P', 'u', 't', 'a', 'l', 'l', ' ',
 	'D', 'u', 'm', 'p', ' ',
 	'E', 'x', 'i', 't', ' ',
+	't', 't', 'y', 't', 'i', 'l', 'e',
 	0
 };
 
@@ -32,17 +33,14 @@ rowinit(Row *row, Rectangle r)
 	row->col = nil;
 	row->ncol = 0;
 	r1 = r;
-	r1.max.y = r1.min.y + font->height;
+	r1.min.y = r1.max.y - font->height;
 	t = &row->tag;
-	textinit(t, fileaddtext(nil, t), r1, rfget(FALSE, FALSE, FALSE, nil), tagcols);
+	textinit(t, fileaddtext(nil, t), r1, rfget(FALSE, FALSE, FALSE, nil), textcols);
 	t->what = Rowtag;
 	t->row = row;
 	t->w = nil;
 	t->col = nil;
-	r1.min.y = r1.max.y;
-	r1.max.y += Border;
-	draw(screen, r1, display->black, nil, ZP);
-	textinsert(t, 0, Lcolhdr, 29, TRUE);
+	/* textinsert(t, 0, Lcolhdr, 35, TRUE); */
 	textsetselect(t, t->file->b.nc, t->file->b.nc);
 }
 
@@ -55,7 +53,7 @@ rowadd(Row *row, Column *c, int x)
 
 	d = nil;
 	r = row->r;
-	r.min.y = row->tag.fr.r.max.y+Border;
+	r.max.y -= font->height + 20;
 	if(x<r.min.x && row->ncol>0){	/*steal 40% of last column by default */
 		d = row->col[row->ncol-1];
 		x = d->r.min.x + 3*Dx(d->r)/5;
@@ -80,7 +78,7 @@ rowadd(Row *row, Column *c, int x)
 		colresize(d, r1);
 		r1.min.x = r1.max.x;
 		r1.max.x = r1.min.x+Border;
-		draw(screen, r1, display->black, nil, ZP);
+		draw(screen, r1, display->white, nil, ZP);
 		r.min.x = r1.max.x;
 	}
 	if(c == nil){
@@ -96,46 +94,63 @@ rowadd(Row *row, Column *c, int x)
 	row->col[i] = c;
 	row->ncol++;
 	clearmouse();
+	rowupdatetag(row);
 	return c;
 }
 
 void
 rowresize(Row *row, Rectangle r)
 {
-	int i, dx, odx, deltax;
-	Rectangle or, r1, r2;
+	int i, dx, odx;
+	Rectangle r1, r2;
 	Column *c;
 
 	dx = Dx(r);
 	odx = Dx(row->r);
-	or = row->r;
-	deltax = r.min.x - or.min.x;
 	row->r = r;
 	r1 = r;
-	r1.max.y = r1.min.y + font->height;
-	textresize(&row->tag, r1, TRUE);
-	r1.min.y = r1.max.y;
-	r1.max.y += Border;
-	draw(screen, r1, display->black, nil, ZP);
-	r.min.y = r1.max.y;
-	r1 = r;
+	r1.max.y = r1.max.y - font->height - 1;
 	r1.max.x = r1.min.x;
 	for(i=0; i<row->ncol; i++){
 		c = row->col[i];
 		r1.min.x = r1.max.x;
-		/* the test should not be necessary, but guarantee we don't lose a pixel */
 		if(i == row->ncol-1)
 			r1.max.x = r.max.x;
 		else
-			r1.max.x = (c->r.max.x-or.min.x)*Dx(r)/Dx(or) + deltax;
+			r1.max.x = r1.min.x+Dx(c->r)*dx/odx;
 		if(i > 0){
 			r2 = r1;
 			r2.max.x = r2.min.x+Border;
-			draw(screen, r2, display->black, nil, ZP);
+			/*draw(screen, r2, but2col, nil, ZP);*/
 			r1.min.x = r2.max.x;
 		}
 		colresize(c, r1);
 	}
+	rowupdatetag(row);
+}
+
+void
+rowupdatetag(Row* row)
+{
+	int i;
+	Rectangle r1, r2;
+	Column *c;
+
+	r1 = row->r;
+	r1.min.y = r1.max.y - font->height - 1;
+	textresize(&row->tag, r1, TRUE);
+	for(i=0; i<row->ncol; i++){
+		c = row->col[i];
+		r2 = c->tag.scrollr;
+		r2.max.y = r1.max.y; /* - font->height/2; */
+		rectclip(&r2, r1);
+		draw(screen, r2, tagcols[TEXT], nil, ZP);
+	}
+	/*
+	r1.min.y--;
+	r1.max.y = r1.min.y + 1;
+	draw(screen, r1, textcols[TEXT], nil, ZP);
+	*/
 }
 
 void
@@ -199,11 +214,12 @@ rowdragcol(Row *row, Column *c, int _0)
 	r.min.x = p.x;
 	r.max.x = r.min.x;
 	r.max.x += Border;
-	draw(screen, r, display->black, nil, ZP);
+	/* draw(screen, r, display->black, nil, ZP); */
 	r.min.x = r.max.x;
 	r.max.x = c->r.max.x;
 	colresize(c, r);
 	colmousebut(c);
+	rowupdatetag(row);
 }
 
 void
@@ -237,7 +253,26 @@ rowclose(Row *row, Column *c, int dofree)
 	}
 	draw(screen, r, display->white, nil, ZP);
 	colresize(c, r);
+	rowupdatetag(row);
 }
+
+Column*
+rowwhichcolscroll(Row *row, Point p)
+{
+	int i;
+	Column *c;
+	Rectangle r;
+
+	for(i=0; i<row->ncol; i++){
+		c = row->col[i];
+		r = c->tag.scrollr;
+		r.max.y = row->r.max.y - font->height / 2 ;
+		if(ptinrect(p, r))
+			return c;
+	}
+	return nil;
+}
+
 
 Column*
 rowwhichcol(Row *row, Point p)
@@ -257,12 +292,28 @@ Text*
 rowwhich(Row *row, Point p)
 {
 	Column *c;
+	Text *t;
+
+	c = rowwhichcol(row, p);
+	if(c)
+	{
+		t = colwhich(c, p);
+		if(t == nil)
+			return nil;
+
+		if(t->what == Columntag)
+			if(ptinrect(p, t->scrollr))
+				return t;
+
+		if(ptinrect(p, row->tag.all))
+			return &row->tag;		
+
+		return t;
+	}
 
 	if(ptinrect(p, row->tag.all))
 		return &row->tag;
-	c = rowwhichcol(row, p);
-	if(c)
-		return colwhich(c, p);
+
 	return nil;
 }
 
@@ -334,7 +385,7 @@ rowdump(Row *row, char *file)
 			warning(nil, "can't find file for dump: $home not defined\n");
 			goto Rescue;
 		}
-		sprint(buf, "%s/acme.dump", home);
+		sprint(buf, "%s/textwin.dump", home);
 		file = buf;
 	}
 	fd = create(file, OWRITE, 0600);
@@ -532,7 +583,7 @@ rowload(Row *row, char *file, int initing)
 			warning(nil, "can't find file for load: $home not defined\n");
 			goto Rescue1;
 		}
-		sprint(buf, "%s/acme.dump", home);
+		sprint(buf, "%s/textwin.dump", home);
 		file = buf;
 	}
 	b = Bopen(file, OREAD);
@@ -590,7 +641,7 @@ rowload(Row *row, char *file, int initing)
 			colresize(c2, r2);
 			r2.min.x = x-Border;
 			r2.max.x = x;
-			draw(screen, r2, display->black, nil, ZP);
+			draw(screen, r2, display->white, nil, ZP);
 		}
 		if(i >= row->ncol)
 			rowadd(row, nil, x);
@@ -634,8 +685,6 @@ rowload(Row *row, char *file, int initing)
 		}
 	}
 	for(;;){
-		if(l == nil)
-			break;
 		dumpid = 0;
 		switch(l[0]){
 		case 'e':
@@ -735,7 +784,7 @@ rowload(Row *row, char *file, int initing)
 		textinsert(&w->tag, w->tag.file->b.nc, r+n+1, nr-(n+1), TRUE);
 		if(ndumped >= 0){
 			/* simplest thing is to put it in a file and load that */
-			sprint(buf, "/tmp/d%d.%.4sacme", getpid(), getuser());
+			sprint(buf, "/tmp/d%d.%.4stextwin", getpid(), getuser());
 			fd = create(buf, OWRITE, 0600);
 			if(fd < 0){
 				free(r);
@@ -780,6 +829,8 @@ rowload(Row *row, char *file, int initing)
 		w->maxlines = min(w->body.fr.nlines, max(w->maxlines, w->body.fr.maxlines));
 Nextline:
 		l = rdline(b, &line);
+		if(l == nil)
+			break;
 	}
 	Bterm(b);
 	fbuffree(buf);

@@ -19,7 +19,7 @@ tempfile(void)
 	char buf[128];
 	int i, fd;
 
-	snprint(buf, sizeof buf, "/tmp/X%d.%.4sacme", getpid(), getuser());
+	snprint(buf, sizeof buf, "/tmp/X%d.%.4stextwin", getpid(), getuser());
 	for(i='A'; i<='Z'; i++){
 		buf[5] = i;
 		if(access(buf, AEXIST) == 0)
@@ -39,7 +39,7 @@ diskinit()
 	d = emalloc(sizeof(Disk));
 	d->fd = tempfile();
 	if(d->fd < 0){
-		fprint(2, "acme: can't create temp file: %r\n");
+		fprint(2, "textwin: can't create temp file: %r\n");
 		threadexitsall("diskinit");
 	}
 	return d;

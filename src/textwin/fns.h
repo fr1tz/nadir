@@ -9,10 +9,16 @@ void	warningew(Window*, Mntdir*, char*, ...);
 #define	fbufalloc()	emalloc(BUFSIZE)
 #define	fbuffree(x)	free(x)
 
+char* getsrvname();
+char* getprtname();
+
 void	plumblook(Plumbmsg *m);
 void	plumbshow(Plumbmsg*m);
-void	acmeputsnarf(void);
-void	acmegetsnarf(void);
+void	textwinputsnarf(void);
+void	textwingetsnarf(void);
+void    updatelabel();
+void    getxselarg(Text*);
+void	putxsel(Text*);
 int	tempfile(void);
 void	scrlresize(void);
 Font*	getfont(int, int, char*);
@@ -57,11 +63,11 @@ void	put(Text*, Text*, Text*, int, int, Rune*, int);
 void	putfile(File*, int, int, Rune*, int);
 void	fontx(Text*, Text*, Text*, int, int, Rune*, int);
 #undef isalnum
-#define isalnum acmeisalnum
+#define isalnum textwinisalnum
 int	isalnum(Rune);
 void	execute(Text*, uint, uint, int, Text*);
 int	search(Text*, Rune*, uint);
-void	look3(Text*, uint, uint, int);
+void	look3(Text*, uint, uint, int, int);
 void	editcmd(Text*, Rune*, uint);
 uint	min(uint, uint);
 uint	max(uint, uint);

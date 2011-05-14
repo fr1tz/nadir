@@ -1,10 +1,8 @@
 <$PLAN9/src/mkhdr
 
-TARG=acme
-DIRS=mail
+TARG=textwin
 
 OFILES=\
-	acme.$O\
 	addr.$O\
 	buff.$O\
 	cols.$O\
@@ -16,6 +14,7 @@ OFILES=\
 	file.$O\
 	fsys.$O\
 	look.$O\
+	main.$O\
 	regx.$O\
 	rows.$O\
 	scrl.$O\
@@ -24,6 +23,7 @@ OFILES=\
 	util.$O\
 	wind.$O\
 	xfid.$O\
+	sele.$O\
 
 HFILES=dat.h\
 	edit.h\

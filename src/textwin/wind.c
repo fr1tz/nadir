@@ -68,9 +68,6 @@ wininit(Window *w, Window *clone, Rectangle r)
 	f = fileaddtext(f, &w->body);
 	w->body.what = Body;
 	textinit(&w->body, f, r1, rf, textcols);
-	r1.min.y -= 1;
-	r1.max.y = r1.min.y+1;
-	draw(screen, r1, tagcols[BORD], nil, ZP);
 	textscrdraw(&w->body);
 	w->r = r;
 	br.min = w->tag.scrollr.min;
@@ -193,9 +190,6 @@ winresize(Window *w, Rectangle r, int safe, int keepextra)
 	if(!safe || !eqrect(w->body.all, r1)){
 		oy = y;
 		if(y+1+w->body.fr.font->height <= r.max.y){	/* room for one line */
-			r1.min.y = y;
-			r1.max.y = y+1;
-			draw(screen, r1, tagcols[BORD], nil, ZP);
 			y++;
 			r1.min.y = min(y, r.max.y);
 			r1.max.y = r.max.y;
@@ -294,6 +288,7 @@ winclose(Window *w)
 		free(w->events);
 		free(w);
 	}
+	updatelabel();
 }
 
 void

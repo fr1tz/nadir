@@ -12,8 +12,10 @@
 #include "dat.h"
 #include "fns.h"
 
-Image	*tagcols[NCOL];
-Image	*textcols[NCOL];
+Image  *tagcols[NCOL];
+Image  *textcols[NCOL];
+char   *menucmds[] = { "New", "Newcol", "Sort", "Zerox", "Delcol", 0 };
+Menu   cmdmenu = { menucmds };
 static Rune Ldot[] = { '.', 0 };
 
 enum{
@@ -34,7 +36,8 @@ textinit(Text *t, File *f, Rectangle r, Reffont *rf, Image *cols[NCOL])
 	t->reffont = rf;
 	t->tabstop = maxtab;
 	memmove(t->fr.cols, cols, sizeof t->fr.cols);
-	textredraw(t, r, rf->f, screen, -1);
+	if(t->what != Hidden)
+		textredraw(t, r, rf->f, screen, -1);
 }
 
 void
@@ -391,6 +394,8 @@ textinsert(Text *t, uint q0, Rune *r, uint n, int tofile)
 		c = 'i';
 		if(t->what == Body)
 			c = 'I';
+		else if(t->what == Tag)
+			updatelabel();
 		if(n <= EVENTSIZE)
 			winevent(t->w, "%c%d %d 0 %d %.*S\n", c, q0, q0+n, n, n, r);
 		else
@@ -657,11 +662,14 @@ texttype(Text *t, Rune r)
 	int nr;
 	Rune *rp;
 	Text *u;
+	int ptwarp;
 
-	if(t->what!=Body && t->what!=Tag && r=='\n')
+	if(t->what==Rowtag && r=='\n')
 		return;
 	if(t->what == Tag)
 		t->w->tagsafe = FALSE;
+
+	ptwarp = 0;
 
 	nr = 1;
 	rp = &r;
@@ -735,6 +743,22 @@ texttype(Text *t, Rune r)
 			q0++;
 		textshow(t, q0, q0, TRUE);
 		return;
+	case 0x4:	/* ^D: execute line */
+		typecommit(t);
+		ptwarp = 1;
+		q0 = q1 = t->q0;
+		/* find beginning of line */
+		while(q0 > 0) { 
+			r = textreadc(t, q0-1);
+			if(r == '\n') 
+				break; 
+			q0--;
+		}
+		/* find end of line */
+		while(q1 < t->file->b.nc && textreadc(t, q1) != '\n') 
+			q1++;
+		execute(t, q0, q1, FALSE, nil);
+		goto dowarp;
 	case Kcmd+'c':	/* %C: copy */
 		typecommit(t);
 		cut(t, t, nil, TRUE, FALSE, nil, 0);
@@ -792,9 +816,10 @@ texttype(Text *t, Rune r)
 	switch(r){
 	case 0x06:	/* ^F: complete */
 	case Kins:
+		ptwarp = 1;
 		rp = textcomplete(t);
 		if(rp == nil)
-			return;
+			goto dowarp;
 		nr = runestrlen(rp);
 		break;	/* fall through to normal insertion case */
 	case 0x1B:
@@ -846,7 +871,7 @@ texttype(Text *t, Rune r)
 			textfill(t->file->text[i]);
 		return;
 	case '\n':
-		if(t->w->autoindent){
+		if(t->w && t->w->autoindent){
 			/* find beginning of previous line using backspace code */
 			nnb = textbswidth(t, 0x15); /* ^U case */
 			rp = runemalloc(nnb + 1);
@@ -895,6 +920,14 @@ texttype(Text *t, Rune r)
 	textsetselect(t, t->q0+nr, t->q0+nr);
 	if(r=='\n' && t->w!=nil)
 		wincommit(t->w, t);
+ dowarp:
+	if(ptwarp)
+	{
+		Point pt;
+		pt = frptofchar(&t->fr, t->q1);
+		pt.y += t->reffont->f->height/2;
+		moveto(mousectl, pt);
+	}
 }
 
 void
@@ -962,6 +995,7 @@ textselect(Text *t)
 	int b, x, y;
 	int state;
 	enum { None, Cut, Paste };
+	int callputxsel = TRUE;
 
 	selecttext = t;
 	/*
@@ -1034,6 +1068,7 @@ textselect(Text *t)
 				}else if(state != Cut){
 					cut(t, t, nil, TRUE, TRUE, nil, 0);
 					state = Cut;
+					callputxsel = FALSE;
 				}
 			}else{
 				if(state==Cut && t->what==Body){
@@ -1043,6 +1078,7 @@ textselect(Text *t)
 				}else if(state != Paste){
 					paste(t, t, nil, TRUE, FALSE, nil, 0);
 					state = Paste;
+					callputxsel = FALSE;
 				}
 			}
 			textscrdraw(t);
@@ -1053,6 +1089,8 @@ textselect(Text *t)
 			readmouse(mousectl);
 		clicktext = nil;
 	}
+	if(callputxsel)
+		putxsel(t);
 }
 
 void
@@ -1299,28 +1337,77 @@ textselect23(Text *t, uint *q0, uint *q1, Image *high, int mask)
 }
 
 int
-textselect2(Text *t, uint *q0, uint *q1, Text **tp)
+textselect2(Text *t, uint *q0, uint *q1)
 {
 	int buts;
 
-	*tp = nil;
 	buts = textselect23(t, q0, q1, but2col, 4);
 	if(buts & 4)
 		return 0;
-	if(buts & 1){	/* pick up argument */
-		*tp = argtext;
+	if(buts & 1)
 		return 1;
-	}
-	return 1;
+	return 2;
 }
 
 int
 textselect3(Text *t, uint *q0, uint *q1)
 {
-	int h;
+	uint p0, p1;
+	int buts;
+	
+	p0 = xselect(&t->fr, mousectl, but3col, &p1);
 
-	h = (textselect23(t, q0, q1, but3col, 1|2) == 0);
-	return h;
+	buts = mousectl->m.buttons;
+	if((buts & 2) == 0){
+		*q0 = p0+t->org;
+		*q1 = p1+t->org;
+	}
+
+	if(buts & 2) {
+		int sel = menuhit(2, mousectl, &cmdmenu, nil);
+		switch(sel) {
+			case 0:
+				new(t, t, nil, 0, 0, nil, 0);
+				break;
+
+			case 1:
+				newcol(t, t, nil, 0, 0, nil, 0);
+				break;
+
+			case 2:
+				sort(t, nil, nil, 0, 0, nil, 0);
+				break;
+
+			case 3:
+				zeroxx(t, nil, nil, 0, 0, nil, 0);
+				break;
+		
+			case 4:
+				delcol(t, nil, nil, nil, nil);
+	
+			default:
+				return 0;
+		}
+	}
+	else if(buts & 1) {
+		look3(t, *q0, *q1, FALSE, TRUE);
+	}
+	else if(buts < 8) {
+		look3(t, *q0, *q1, FALSE, FALSE);
+	}
+
+	while(buts = mousectl->m.buttons)
+	{
+		if(buts & 16) {
+			texttype(t, Kpgdown);
+		}
+		else if(buts & 8) {
+			texttype(t, Kpgup);
+		}
+		readmouse(mousectl);
+	}
+
+	return 0;
 }
 
 static Rune left1[] =  { '{', '[', '(', '<', 0xab, 0 };
@@ -1581,6 +1668,10 @@ textsetorigin(Text *t, uint org, int exact)
 	}else
 		frdelete(&t->fr, 0, t->fr.nchars);
 	t->org = org;
+
+	if(fancygfx)
+		textredraw(t, t->fr.r, t->fr.font, t->fr.b, Dx(t->all));
+
 	textfill(t);
 	textscrdraw(t);
 	textsetselect(t, t->q0, t->q1);

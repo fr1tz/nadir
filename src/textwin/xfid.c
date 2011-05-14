@@ -860,7 +860,7 @@ xfideventwrite(Xfid *x, Window *w)
 			break;
 		case 'l':
 		case 'L':
-			look3(t, q0, q1, TRUE);
+			look3(t, q0, q1, TRUE, FALSE);
 			break;
 		default:
 			qunlock(&row.lk);

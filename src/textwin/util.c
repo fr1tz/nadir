@@ -70,7 +70,7 @@ cvttorunes(char *p, int n, Rune *r, int *nb, int *nr, int *nulls)
 void
 error(char *s)
 {
-	fprint(2, "acme: %s: %r\n", s);
+	fprint(2, "textwin: %s: %r\n", s);
 	threadexitsall(nil);
 }
 
