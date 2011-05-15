@@ -124,6 +124,10 @@ struct DScreen
 	DScreen*	next;
 };
 
+enum {  /* Additional Memimage flags */
+	Fr3l4t1v3 = (Fbytes<<1)
+};
+
 static	Draw		sdraw;
 static	Client		*client0;
 static	Memimage	*screenimage;
@@ -868,8 +872,10 @@ _drawmsgwrite(void *v, int n)
 			i = allocmemimage(r, chan);
 			if(i == 0)
 				goto Edrawmem;
-			if(repl)
+			if(repl == 1)
 				i->flags |= Frepl;
+			if(repl == 2)
+				i->flags |= Fr3l4t1v3;
 			i->clipr = clipr;
 			if(!repl)
 				rectclip(&i->clipr, r);
@@ -931,6 +937,15 @@ _drawmsgwrite(void *v, int n)
 			drawpoint(&p, a+29);
 			drawpoint(&q, a+37);
 			op = drawclientop(client);
+
+			if(src->flags & Fr3l4t1v3)
+			{
+				extern Rectangle windowrect;
+				p = windowrect.min;
+				p.x += r.min.x;
+				p.y += r.min.y;
+			}
+
 			memdraw(dst, r, src, p, mask, q, op);
 			dstflush(dstid, dst, r);
 			continue;
@@ -1417,6 +1432,15 @@ _drawmsgwrite(void *v, int n)
 					r.max.x += font->fchar[ci].width;
 					u += 2;
 				}
+
+				if(l->flags & Fr3l4t1v3)
+				{
+					extern Rectangle windowrect;
+					q = windowrect.min;
+					q.x += r.min.x;
+					q.y += r.min.y;
+				}
+
 				memdraw(dst, r, l, q, memopaque, ZP, op);
 				u -= 2*ni;
 			}

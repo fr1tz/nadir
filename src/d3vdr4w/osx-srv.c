@@ -89,7 +89,6 @@ zunlock(void)
 int chatty;
 int drawsleep;
 int trace;
-int multitouch = 1;
 
 void
 usage(void)
@@ -130,9 +129,6 @@ threadmain(int argc, char **argv)
 	ARGBEGIN{
 	case 'D':
 		chatty++;
-		break;
-	case 'M':
-		multitouch = 0;
 		break;
 	default:
 		usage();

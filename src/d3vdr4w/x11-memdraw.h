@@ -115,3 +115,4 @@ extern int		_xreplacescreenimage(void);
 extern Rectangle screenrect;
 extern Rectangle windowrect;
 extern int fullscreen;
+extern char* windowclass;

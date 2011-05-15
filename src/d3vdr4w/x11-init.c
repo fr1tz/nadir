@@ -316,8 +316,8 @@ _xattach(char *label, char *winsize)
 	hint.initial_state = NormalState;
 
 	memset(&classhint, 0, sizeof classhint);
-	classhint.res_name = label;
-	classhint.res_class = label;
+	classhint.res_name = windowclass;
+	classhint.res_class = windowclass;
 
 	argv[0] = label;
 	argv[1] = nil;

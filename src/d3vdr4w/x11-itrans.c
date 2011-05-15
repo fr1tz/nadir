@@ -37,7 +37,7 @@ __xtoplan9kbd(XEvent *e)
 	needstack(64*1024);	/* X has some *huge* buffers in openobject */
 		/* and they're even bigger on SuSE */
 	XLookupString((XKeyEvent*)e,NULL,0,&k,NULL);
-	if(k == k == NoSymbol)
+	if(k == XK_Multi_key || k == NoSymbol)
 		return -1;
 
 	if(k&0xFF00){
@@ -113,7 +113,6 @@ __xtoplan9kbd(XEvent *e)
 		case XK_Meta_L:	/* Shift Alt on PCs */
 		case XK_Alt_R:
 		case XK_Meta_R:	/* Shift Alt on PCs */
-		case XK_Multi_key:
 			k = Kalt;
 			break;
 		default:		/* not ISO-1 or tty control */
@@ -519,16 +518,17 @@ _xselect(XEvent *e)
 
 	memset(&r, 0, sizeof r);
 	xe = (XSelectionRequestEvent*)e;
-if(0) fprint(2, "xselect target=%d requestor=%d property=%d selection=%d (sizeof atom=%d)\n",
-	xe->target, xe->requestor, xe->property, xe->selection, sizeof a[0]);
+if(0) fprint(2, "xselect target=%d requestor=%d property=%d selection=%d\n",
+	xe->target, xe->requestor, xe->property, xe->selection);
 	r.xselection.property = xe->property;
 	if(xe->target == _x.targets){
 		a[0] = _x.utf8string;
 		a[1] = XA_STRING;
 		a[2] = _x.text;
 		a[3] = _x.compoundtext;
-		XChangeProperty(_x.display, xe->requestor, xe->property, XA_ATOM,
-			32, PropModeReplace, (uchar*)a, nelem(a));
+
+		XChangeProperty(_x.display, xe->requestor, xe->property, xe->target,
+			8*sizeof(a[0]), PropModeReplace, (uchar*)a, nelem(a));
 	}else if(xe->target == XA_STRING 
 	|| xe->target == _x.utf8string 
 	|| xe->target == _x.text 

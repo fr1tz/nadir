@@ -47,12 +47,7 @@ if [ $WSYSTYPE = x11 ]; then
 	XO=`ls x11-*.c 2>/dev/null | sed 's/\.c$/.o/'`
 	echo 'WSYSOFILES=$WSYSOFILES '$XO
 elif [ $WSYSTYPE = osx ]; then
-	if [ -d /System/Library/PrivateFrameworks/MultitouchSupport.framework ]; then
-		echo 'CFLAGS=$CFLAGS -DMULTITOUCH'
-		echo 'LDFLAGS=$LDFLAGS -F/System/Library/PrivateFrameworks'
-	fi
-	echo 'WSYSOFILES=$WSYSOFILES osx-screen-carbon-objc.o osx-draw.o osx-srv.o'
-	echo 'MACARGV=install-macargv'
+	echo 'WSYSOFILES=$WSYSOFILES osx-screen.o osx-draw.o osx-srv.o'
 elif [ $WSYSTYPE = nowsys ]; then
 	echo 'WSYSOFILES=nowsys.o'
 fi

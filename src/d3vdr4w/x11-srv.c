@@ -97,6 +97,8 @@ int fullscreen;
 Rectangle windowrect;
 Rectangle screenrect;
 
+char* windowclass;
+
 void
 usage(void)
 {
@@ -143,6 +145,8 @@ main(int argc, char **argv)
 	default:
 		usage();
 	}ARGEND
+
+	windowclass = argv[0];
 
 	/*
 	 * Ignore arguments.  They're only for good ps -a listings.
