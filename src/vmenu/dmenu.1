@@ -5,12 +5,28 @@ dmenu \- dynamic menu
 .B dmenu
 .RB [ \-i ]
 .RB [ \-b ]
+.RB [ \-r ]
+.RB [ \-x " <xoffset>"]
+.RB [ \-y " <yoffset>"]
+.RB [ \-w " <width>"]
 .RB [ \-fn " <font>"]
 .RB [ \-nb " <color>"]
 .RB [ \-nf " <color>"]
 .RB [ \-p " <prompt>"]
 .RB [ \-sb " <color>"]
 .RB [ \-sf " <color>"]
+.RB [ \-hist " <filename>"]
+.RB [ \-l " <#items>"]
+.RB [ \-h " <height>"]
+.RB [ \-c ]
+.RB [ \-ms ]
+.RB [ \-ml ]
+.RB [ \-lb " <color>"]
+.RB [ \-lf " <color>"]
+.RB [ \-rs ]
+.RB [ \-ni ]
+.RB [ \-nl ]
+.RB [ \-xs ]
 .RB [ \-v ]
 .SH DESCRIPTION
 .SS Overview
@@ -25,6 +41,18 @@ makes dmenu match menu entries case insensitively.
 .TP
 .B \-b
 defines that dmenu appears at the bottom.
+.TP
+.B \-r
+defines that dmenu appears on the right.
+.TP
+.B \-x
+defines distance to left or right side of the screen, depends on -r.
+.TP
+.B \-y
+defines distance to top or bottom of the screen, depends on -b.
+.TP
+.B \-w
+defines the window width.
 .TP
 .B \-fn <font>
 defines the font.
@@ -44,8 +72,47 @@ defines the selected background color (#RGB, #RRGGBB, and color names are suppor
 .B \-sf <color>
 defines the selected foreground color (#RGB, #RRGGBB, and color names are supported).
 .TP
+.B \-nl
+seperates standard output by newlines.
+.TP
+.B \-xs
+xmms-like pattern matching.
+.TP
 .B \-v
 prints version information to standard output, then exits.
+.SS Vertical Mode Options
+.TP
+.B \-l <#items>
+activates vertical list mode.
+window-size will be adjusted for displaying the given number of items.
+.TP
+.B \-h
+activates vertical list mode and defines the window height.
+don't expect exact results. given height is used to calculate
+#items. gets overridden by -l.
+.TP
+.B \-c
+displays a counter showing hits on applied filter.
+.TP
+.B \-ms
+multi-select; selecting an item and pressing return won't terminate dmenu.
+.TP
+.B \-ml
+marks last selected item using the colors defined with -lb and -lf.
+only useful when used with -ms.
+.TP
+.B \-lb <color>
+defines the last-selected background color (#RGB, #RRGGBB, and color names are supported).
+.TP
+.B \-lf <color>
+defines the last-selected foreground color (#RGB, #RRGGBB, and color names are supported).
+.TP
+.B \-rs
+resize; adjust window-size for displaying the matching items.
+-l or -h define the maximum.
+.TP
+.B \-ni
+don't display indicators.
 .SH USAGE
 dmenu reads a list of newline-separated items from standard input and creates a
 menu.  When the user selects an item or enters any text and presses Return, his/her

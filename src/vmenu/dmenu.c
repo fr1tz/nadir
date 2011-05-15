@@ -19,6 +19,8 @@
 #define INRECT(X,Y,RX,RY,RW,RH) ((X) >= (RX) && (X) < (RX) + (RW) && (Y) >= (RY) && (Y) < (RY) + (RH))
 #define MIN(a, b)               ((a) < (b) ? (a) : (b))
 
+#define HIST_SIZE 20
+
 /* enums */
 enum { ColFG, ColBG, ColLast };
 
@@ -27,6 +29,7 @@ typedef struct {
 	int x, y, w, h;
 	unsigned long norm[ColLast];
 	unsigned long sel[ColLast];
+	unsigned long last[ColLast];
 	Drawable drawable;
 	GC gc;
 	struct {
@@ -47,20 +50,23 @@ struct Item {
 
 /* forward declarations */
 static void appenditem(Item *i, Item **list, Item **last);
-static void calcoffsets(void);
+static void calcoffsetsh(void);
+static void calcoffsetsv(void);
 static char *cistrstr(const char *s, const char *sub);
 static void cleanup(void);
-static void drawmenu(void);
+static void drawmenuh(void);
+static void drawmenuv(void);
 static void drawtext(const char *text, unsigned long col[ColLast]);
 static void eprint(const char *errstr, ...);
 static unsigned long getcolor(const char *colstr);
 static Bool grabkeyboard(void);
 static void initfont(const char *fontstr);
 static void kpress(XKeyEvent * e);
+static void resizewindow(void);
 static void match(char *pattern);
 static void readstdin(void);
 static void run(void);
-static void setup(Bool topbar);
+static void setup(void);
 static int textnw(const char *text, unsigned int len);
 static int textw(const char *text);
 
@@ -69,14 +75,34 @@ static int textw(const char *text);
 /* variables */
 static char *maxname = NULL;
 static char *prompt = NULL;
+static char *lastitem = NULL; 
+static char *nl = "";
+static char **tokens = NULL;
 static char text[4096];
+static char hitstxt[16];
 static int cmdw = 0;
 static int promptw = 0;
 static int ret = 0;
 static int screen;
+static int x, y;
 static unsigned int mw, mh;
 static unsigned int numlockmask = 0;
+static unsigned int hits = 0;
+static unsigned int lines = 0;
+static unsigned int xoffset = 0;
+static unsigned int yoffset = 0;
+static unsigned int width = 0;
+static unsigned int height = 0;
 static Bool running = True;
+static Bool topbar = True;
+static Bool vlist = False;
+static Bool hitcounter = False;
+static Bool alignright = False;
+static Bool multiselect = False;
+static Bool resize = False;
+static Bool marklastitem = False;
+static Bool indicators = True;
+static Bool xmms = False;
 static Display *dpy;
 static DC dc;
 static Item *allitems = NULL;	/* first of all items */
@@ -88,6 +114,54 @@ static Item *curr = NULL;
 static Window root, win;
 static int (*fstrncmp)(const char *, const char *, size_t n) = strncmp;
 static char *(*fstrstr)(const char *, const char *) = strstr;
+static void (*calcoffsets)(void) = calcoffsetsh;
+static void (*drawmenu)(void) = drawmenuh;
+
+static char hist[HIST_SIZE][1024];
+static char *histfile = NULL;
+static int hcnt = 0;
+
+static int
+writehistory(char *command) {
+   int i = 0, j = hcnt;
+   FILE *f;
+
+   if(!histfile || strlen(command) <= 0)
+      return 0;
+
+   if( (f = fopen(histfile, "w")) ) {
+      fputs(command, f);
+         fputc('\n', f);
+      for(; i<HIST_SIZE && i<j; i++) {
+         if(strcmp(command, hist[i]) != 0) {
+            fputs(hist[i], f);
+            fputc('\n', f);
+         }
+      }
+      fclose(f);
+      return 1;
+   }
+
+   return 0;
+}
+
+static int
+readhistory (void) {
+   char buf[1024];
+   FILE *f;
+
+
+   if(!histfile)
+      return 0;
+
+   if( (f = fopen(histfile, "r+")) ) {
+      while(fgets(buf, sizeof buf, f) && (hcnt < HIST_SIZE))  
+         strncpy(hist[hcnt++], buf, (strlen(buf) <= 1024) ? strlen(buf): 1024 );
+      fclose(f);
+   }
+
+   return hcnt;
+}
 
 void
 appenditem(Item *i, Item **list, Item **last) {
@@ -98,12 +172,13 @@ appenditem(Item *i, Item **list, Item **last) {
 	i->left = *last;
 	i->right = NULL;
 	*last = i;
+	++hits;
 }
 
 void
-calcoffsets(void) {
-	int tw;
-	unsigned int w;
+calcoffsetsh(void) {
+	static int tw;
+	static unsigned int w;
 
 	if(!curr)
 		return;
@@ -123,6 +198,26 @@ calcoffsets(void) {
 			tw = mw / 3;
 		w += tw;
 		if(w > mw)
+			break;
+	}
+}
+
+void
+calcoffsetsv(void) {
+	static unsigned int w;
+
+	if(!curr)
+		return;
+	w = (dc.font.height + 2) * (lines + 1);
+	for(next = curr; next; next=next->right) {
+		w -= dc.font.height + 2;
+		if(w <= 0)
+			break;
+	}
+	w = (dc.font.height + 2) * (lines + 1);
+	for(prev = curr; prev && prev->left; prev=prev->left) {
+		w -= dc.font.height + 2;
+		if(w <= 0)
 			break;
 	}
 }
@@ -168,11 +263,12 @@ cleanup(void) {
 	XFreeGC(dpy, dc.gc);
 	XDestroyWindow(dpy, win);
 	XUngrabKeyboard(dpy, CurrentTime);
+	free(tokens);
 }
 
 void
-drawmenu(void) {
-	Item *i;
+drawmenuh(void) {
+	static Item *i;
 
 	dc.x = 0;
 	dc.y = 0;
@@ -212,6 +308,87 @@ drawmenu(void) {
 }
 
 void
+drawmenuv(void) {
+	static Item *i;
+
+	dc.x = 0;
+	dc.y = 0;
+	dc.h = mh;
+	drawtext(NULL, dc.norm);
+	/* print prompt? */
+	if(promptw) {
+		dc.w = promptw;
+		drawtext(prompt, dc.sel);
+	}
+	dc.x += promptw;
+	dc.w = mw - promptw - (hitcounter ? textnw(hitstxt, strlen(hitstxt)) : 0);
+
+	drawtext(text[0] ? text : NULL, dc.norm);
+	if(curr) {
+		if (hitcounter) {
+			dc.w = textw(hitstxt);
+			dc.x = mw - textw(hitstxt);
+			drawtext(hitstxt, dc.norm);
+		}
+		dc.x = 0;
+		dc.w = mw;
+		if (indicators) {	
+			dc.y += dc.font.height + 2;
+			drawtext((curr && curr->left) ? "^" : NULL, dc.norm);
+		}
+		dc.y += dc.font.height + 2;
+		/* determine maximum items */
+		for(i = curr; i != next; i=i->right) {
+			if((sel != i) && marklastitem && lastitem && !strncmp(lastitem, i->text, strlen(i->text)))
+				drawtext(i->text, dc.last);
+			else
+				drawtext(i->text, (sel == i) ? dc.sel : dc.norm);
+			dc.y += dc.font.height + 2;
+		}
+		drawtext(indicators && next ? "v" : NULL, dc.norm);
+	} else {
+		if (hitcounter) {
+			dc.w = textw(hitstxt);
+			dc.x = mw - textw(hitstxt);
+			dc.y = 0;
+			drawtext(hitstxt, dc.norm);
+		}
+		dc.x = 0;
+		dc.w = mw;
+		dc.h = mh;
+		dc.y += dc.font.height + 2;
+		drawtext(NULL, dc.norm);
+	} 
+	XCopyArea(dpy, dc.drawable, win, dc.gc, 0, 0, mw, mh, 0, 0);
+	XFlush(dpy);
+}
+
+void
+updatemenuv(Bool updown) {
+	static Item *i;
+	
+	if(curr) {
+		dc.x = 0;
+		dc.y = (dc.font.height + 2) * (indicators?2:1);
+		dc.w = mw;
+		dc.h = mh;
+		for(i = curr; i != next; i = i->right) {
+			if(((i == sel->left) && !updown) || (i == sel)
+			||((i == sel->right) && updown)) {
+				if((sel != i) && marklastitem && lastitem && !strncmp(lastitem, i->text, strlen(i->text)))
+					drawtext(i->text, dc.last);
+				else
+					drawtext(i->text, (sel == i) ? dc.sel : dc.norm);
+				XCopyArea(dpy, dc.drawable, win, dc.gc, dc.x, dc.y,
+					dc.w, dc.font.height + 2, dc.x, dc.y);
+			}
+			dc.y += dc.font.height + 2;
+		}
+	}			
+	XFlush(dpy);
+}
+
+void
 drawtext(const char *text, unsigned long col[ColLast]) {
 	char buf[256];
 	int i, x, y, h, len, olen;
@@ -222,8 +399,8 @@ drawtext(const char *text, unsigned long col[ColLast]) {
 	if(!text)
 		return;
 	olen = strlen(text);
-	h = dc.font.ascent + dc.font.descent;
-	y = dc.y + (dc.h / 2) - (h / 2) + dc.font.ascent;
+	h = dc.font.height;
+	y = dc.y + ((h + 2) / 2) - (h / 2) + dc.font.ascent;
 	x = dc.x + (h / 2);
 	/* shorten text if necessary */
 	for(len = MIN(olen, sizeof buf); len && textnw(text, len) > dc.w - h; len--);
@@ -426,12 +603,21 @@ kpress(XKeyEvent * e) {
 		calcoffsets();
 		break;
 	case XK_Left:
+	case XK_Up:
 		if(!(sel && sel->left))
 			return;
 		sel=sel->left;
 		if(sel->right == curr) {
-			curr = prev;
+			if (vlist)
+				curr = curr->left;
+			else
+				curr = prev;
 			calcoffsets();
+		} else {
+			if (vlist) {
+				updatemenuv(True);
+				return;
+			}
 		}
 		break;
 	case XK_Next:
@@ -448,21 +634,33 @@ kpress(XKeyEvent * e) {
 		break;
 	case XK_Return:
 		if((e->state & ShiftMask) && *text)
-			fprintf(stdout, "%s", text);
-		else if(sel)
-			fprintf(stdout, "%s", sel->text);
+			fprintf(stdout, "%s%s", text, nl);
+		else if(sel) {
+			fprintf(stdout, "%s%s", sel->text, nl);
+			lastitem = sel->text;
+		}
 		else if(*text)
-			fprintf(stdout, "%s", text);
+			fprintf(stdout, "%s%s", text, nl);
+		writehistory( (sel == NULL) ? text : sel->text);
 		fflush(stdout);
-		running = False;
+		running = multiselect;
 		break;
 	case XK_Right:
+	case XK_Down:
 		if(!(sel && sel->right))
 			return;
 		sel=sel->right;
 		if(sel == next) {
-			curr = next;
+			if (vlist)
+				curr = curr->right;
+			else
+				curr = next;
 			calcoffsets();
+		} else {
+			if (vlist) {
+				updatemenuv(False);
+				return;
+			}
 		}
 		break;
 	case XK_Tab:
@@ -475,22 +673,68 @@ kpress(XKeyEvent * e) {
 	drawmenu();
 }
 
+void resizewindow(void)
+{
+	if (resize) {
+		static int rlines, ry, rmh;
+
+		rlines = (hits > lines ? lines : hits) + (indicators?3:1);
+		rmh = vlist ? (dc.font.height + 2) * rlines : mh;
+		ry = topbar ? y + yoffset : y - rmh + (dc.font.height + 2) - yoffset;
+		XMoveResizeWindow(dpy, win, x, ry, mw, rmh);
+	}
+}
+
+unsigned int tokenize(char *pat, char **tok)
+{
+	unsigned int i = 0;
+	char tmp[4096] = {0};
+
+	strncpy(tmp, pat, strlen(pat));
+	tok[0] = strtok(tmp, " ");
+
+	while(tok[i] && i < maxtokens)
+		tok[++i] = strtok(NULL, " ");
+	return i;
+}
+
 void
 match(char *pattern) {
-	unsigned int plen;
+	unsigned int plen, tokencnt = 0;
+	char append = 0;
 	Item *i, *itemend, *lexact, *lprefix, *lsubstr, *exactend, *prefixend, *substrend;
 
 	if(!pattern)
 		return;
-	plen = strlen(pattern);
+
+	if(!xmms)
+		tokens[(tokencnt = 1)-1] = pattern;
+	else
+		if(!(tokencnt = tokenize(pattern, tokens)))
+			tokens[(tokencnt = 1)-1] = "";
+
 	item = lexact = lprefix = lsubstr = itemend = exactend = prefixend = substrend = NULL;
-	for(i = allitems; i; i = i->next)
-		if(!fstrncmp(pattern, i->text, plen + 1))
+	for(i = allitems; i; i = i->next) {
+		for(int j = 0; j < tokencnt; ++j) {
+			plen = strlen(tokens[j]);
+			if(!fstrncmp(tokens[j], i->text, plen + 1))
+				append = !append || append > 1 ? 1 : append;
+			else if(!fstrncmp(tokens[j], i->text, plen ))
+				append = !append || append > 2 ? 2 : append;
+			else if(fstrstr(i->text, tokens[j]))
+				append = append > 0 && append < 3 ? append : 3;
+			else {
+				append = 0;
+				break;
+			}
+		}
+		if(append == 1)
 			appenditem(i, &lexact, &exactend);
-		else if(!fstrncmp(pattern, i->text, plen))
+		else if(append == 2)
 			appenditem(i, &lprefix, &prefixend);
-		else if(fstrstr(i->text, pattern))
+		else if(append == 3)
 			appenditem(i, &lsubstr, &substrend);
+	}
 	if(lexact) {
 		item = lexact;
 		itemend = exactend;
@@ -514,6 +758,9 @@ match(char *pattern) {
 	}
 	curr = prev = next = sel = item;
 	calcoffsets();
+	resizewindow();
+	snprintf(hitstxt, sizeof(hitstxt), "(%d)", hits);
+	hits = 0;
 }
 
 void
@@ -521,8 +768,33 @@ readstdin(void) {
 	char *p, buf[1024];
 	unsigned int len = 0, max = 0;
 	Item *i, *new;
+	int k;
 
 	i = 0;
+
+	if( readhistory() )  {
+		for(k=0; k<hcnt; k++) {
+			len = strlen(hist[k]);
+			if (hist[k][len - 1] == '\n')
+				hist[k][len - 1] = 0;
+			p = strdup(hist[k]);
+			if(max < len) {
+				maxname = p;
+				max = len;
+			}
+			if(!(new = (Item *)malloc(sizeof(Item))))
+				eprint("fatal: could not malloc() %u bytes\n", sizeof(Item));
+			new->next = new->left = new->right = NULL;
+			new->text = p;
+			if(!i)
+				allitems = new;
+			else 
+				i->next = new;
+			i = new;
+		}
+	}
+	len=0; max=0;
+
 	while(fgets(buf, sizeof buf, stdin)) {
 		len = strlen(buf);
 		if (buf[len - 1] == '\n')
@@ -565,8 +837,8 @@ run(void) {
 }
 
 void
-setup(Bool topbar) {
-	int i, j, x, y;
+setup(void) {
+	int i, j, sy, slines;
 #if XINERAMA
 	int n;
 	XineramaScreenInfo *info = NULL;
@@ -589,6 +861,8 @@ setup(Bool topbar) {
 	dc.norm[ColFG] = getcolor(normfgcolor);
 	dc.sel[ColBG] = getcolor(selbgcolor);
 	dc.sel[ColFG] = getcolor(selfgcolor);
+	dc.last[ColBG] = getcolor(lastbgcolor);
+	dc.last[ColFG] = getcolor(lastfgcolor);
 	initfont(font);
 
 	/* menu window */
@@ -623,7 +897,15 @@ setup(Bool topbar) {
 		mw = DisplayWidth(dpy, screen);
 	}
 
-	win = XCreateWindow(dpy, root, x, y, mw, mh, 0,
+	/* update menu window geometry */
+	
+	slines = (lines ? lines : (lines = height / (dc.font.height + 2))) + (indicators?3:1);
+	mh = vlist ? (dc.font.height + 2) * slines : mh;
+	sy = topbar ? y + yoffset : y - mh + (dc.font.height + 2) - yoffset;
+	x = alignright ? mw - (width ? width : mw) - xoffset : xoffset;
+	mw = width ? width : mw;
+
+	win = XCreateWindow(dpy, root, x, sy, mw, mh, 0,
 			DefaultDepth(dpy, screen), CopyFromParent,
 			DefaultVisual(dpy, screen),
 			CWOverrideRedirect | CWBackPixmap | CWEventMask, &wa);
@@ -643,8 +925,16 @@ setup(Bool topbar) {
 	if(promptw > mw / 5)
 		promptw = mw / 5;
 	text[0] = 0;
+	tokens = malloc((xmms?maxtokens:1)*sizeof(char*));
 	match(text);
 	XMapRaised(dpy, win);
+
+	/* set WM_CLASS */
+	XClassHint *ch = XAllocClassHint();
+	ch->res_name = "dmenu";
+	ch->res_class = "dmenu";
+	XSetClassHint(dpy, win, ch);
+	XFree(ch);
 }
 
 int
@@ -666,7 +956,6 @@ textw(const char *text) {
 int
 main(int argc, char *argv[]) {
 	unsigned int i;
-	Bool topbar = True;
 
 	/* command line args */
 	for(i = 1; i < argc; i++)
@@ -676,6 +965,16 @@ main(int argc, char *argv[]) {
 		}
 		else if(!strcmp(argv[i], "-b"))
 			topbar = False;
+		else if(!strcmp(argv[i], "-r"))
+			alignright = True;
+		else if(!strcmp(argv[i], "-l")) {
+			vlist = True;
+			calcoffsets = calcoffsetsv;
+			drawmenu = drawmenuv;
+			if(++i < argc) lines += atoi(argv[i]);
+		}
+		else if(!strcmp(argv[i], "-c"))
+			hitcounter = True;
 		else if(!strcmp(argv[i], "-fn")) {
 			if(++i < argc) font = argv[i];
 		}
@@ -694,11 +993,50 @@ main(int argc, char *argv[]) {
 		else if(!strcmp(argv[i], "-sf")) {
 			if(++i < argc) selfgcolor = argv[i];
 		}
+		else if(!strcmp(argv[i], "-hist")) {
+			if(++i < argc) histfile = argv[i];
+		}
+		else if(!strcmp(argv[i], "-lb")) {
+			if(++i < argc) lastbgcolor = argv[i];
+		}
+		else if(!strcmp(argv[i], "-lf")) {
+			if(++i < argc) lastfgcolor = argv[i];
+		}
+		else if(!strcmp(argv[i], "-w")) {
+			if(++i < argc) width = atoi(argv[i]);
+		}
+		else if(!strcmp(argv[i], "-h")) {
+			vlist = True;
+			calcoffsets = calcoffsetsv;
+			drawmenu = drawmenuv;
+			if(++i < argc) height = atoi(argv[i]);
+		}
+		else if(!strcmp(argv[i], "-x")) {
+			if(++i < argc) xoffset = atoi(argv[i]);
+		}
+		else if(!strcmp(argv[i], "-y")) {
+			if(++i < argc) yoffset = atoi(argv[i]);
+		}
+		else if(!strcmp(argv[i], "-nl"))
+			nl = "\n";
+		else if(!strcmp(argv[i], "-rs"))
+			resize = True;
+		else if(!strcmp(argv[i], "-ms"))
+			multiselect = True;
+		else if(!strcmp(argv[i], "-ml"))
+			marklastitem = True;
+		else if(!strcmp(argv[i], "-ni"))
+			indicators = False;
+		else if(!strcmp(argv[i], "-xs"))
+			xmms = True;
 		else if(!strcmp(argv[i], "-v"))
-			eprint("dmenu-"VERSION", © 2006-2008 dmenu engineers, see LICENSE for details\n");
+			eprint("dmenu-"VERSION", © 2006-2009 dmenu engineers, see LICENSE for details\n");
 		else
-			eprint("usage: dmenu [-i] [-b] [-fn <font>] [-nb <color>] [-nf <color>]\n"
-			       "             [-p <prompt>] [-sb <color>] [-sf <color>] [-v]\n");
+			eprint("usage: dmenu [-i] [-b] [-r] [-x <xoffset> [-y <yoffset>] [-w <width]\n"
+			       "[-fn <font>] [-nb <color>] [-nf <color>] [-p <prompt>] [-sb <color>]\n"
+			       "[-sf <color>] [-hist <filename>] [-l <#items>] [-h <height>] [-c] [-ms]\n"
+			       "[-ml] [-lb <color>] [-lf <color>] [-rs] [-ni] [-nl] [-xs] [-v]\n");
+
 	if(!setlocale(LC_CTYPE, "") || !XSupportsLocale())
 		fprintf(stderr, "warning: no locale support\n");
 	if(!(dpy = XOpenDisplay(NULL)))
@@ -714,8 +1052,8 @@ main(int argc, char *argv[]) {
 		running = grabkeyboard();
 		readstdin();
 	}
-
-	setup(topbar);
+	
+	setup();
 	drawmenu();
 	XSync(dpy, False);
 	run();
