@@ -867,8 +867,8 @@ setup(void) {
 
 	/* set WM_CLASS */
 	XClassHint *ch = XAllocClassHint();
-	ch->res_name = "vmenu";
-	ch->res_class = "vmenu";
+	ch->res_name = "nmenu";
+	ch->res_class = "nmenu";
 	XSetClassHint(dpy, win, ch);
 	XFree(ch);
 }
@@ -940,13 +940,13 @@ main(int argc, char *argv[]) {
 			if(++i < argc) prompt = argv[i];
 		}
 		else
-			eprint("usage: vmenu [-iczr] [-x xpos] [-y ypos] [-w width] [-h height] [-p prompt]\n");
+			eprint("usage: nmenu [-iczr] [-x xpos] [-y ypos] [-w width] [-h height] [-p prompt]\n");
 
 	}
 	if(!setlocale(LC_CTYPE, "") || !XSupportsLocale())
 		fprint(2, "warning: no locale support\n");
 	if(!(dpy = XOpenDisplay(NULL)))
-		eprint("vmenu: cannot open display\n");
+		eprint("nmenu: cannot open display\n");
 	screen = DefaultScreen(dpy);
 	root = RootWindow(dpy, screen);
 

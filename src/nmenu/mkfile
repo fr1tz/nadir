@@ -1,10 +1,10 @@
 <$NADIR/config
 <$PLAN9/src/mkhdr
 
-TARG=vmenu
+TARG=nmenu
 
 OFILES=\
-	vmenu.$O
+	nmenu.$O
 
 CPPFLAGS = $XINERAMAFLAGS
 CFLAGS = -std=c99 -pedantic -Wall -Os -I$X11INC $CPPFLAGS
