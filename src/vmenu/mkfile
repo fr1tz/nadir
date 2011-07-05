@@ -1,0 +1,15 @@
+<$NADIR/config
+<$PLAN9/src/mkhdr
+
+TARG=vmenu
+
+OFILES=\
+	vmenu.$O
+
+CPPFLAGS = $XINERAMAFLAGS
+CFLAGS = -std=c99 -pedantic -Wall -Os -I$X11INC $CPPFLAGS
+LDFLAGS = -s -L/usr/lib -lc -L$X11LIB -lX11 $XINERAMALIBS
+
+<$PLAN9/src/mkone
+
+

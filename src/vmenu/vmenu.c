@@ -1,12 +1,9 @@
 /* See LICENSE file for copyright and license details. */
-#include <ctype.h>
+
+#include <u.h>
+#include <libc.h>
+#include <bio.h>
 #include <locale.h>
-#include <stdarg.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <strings.h>
-#include <unistd.h>
 #include <X11/keysym.h>
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
@@ -57,7 +54,6 @@ struct Shortcut {
 /* forward declarations */
 static void appenditem(Item *i, Item **list, Item **last);
 static void calcoffsets(void);
-static char *cistrstr(const char *s, const char *sub);
 static void cleanup(void);
 static void drawmenu(void);
 static void drawtext(const char *text, int selected);
@@ -155,29 +151,6 @@ calcoffsets(void) {
 		if(w <= 0)
 			break;
 	}
-}
-
-char *
-cistrstr(const char *s, const char *sub) {
-	int c, csub;
-	unsigned int len;
-
-	if(!sub)
-		return (char *)s;
-	if((c = *sub++) != 0) {
-		c = tolower(c);
-		len = strlen(sub);
-		do {
-			do {
-				if((csub = *s++) == 0)
-					return NULL;
-			}
-			while(tolower(csub) != c);
-		}
-		while(strncasecmp(s, sub, len) != 0);
-		s--;
-	}
-	return (char *)s;
 }
 
 void
@@ -318,7 +291,7 @@ eprint(const char *errstr, ...) {
 	va_list ap;
 
 	va_start(ap, errstr);
-	vfprintf(stderr, errstr, ap);
+	vfprint(2, errstr, ap);
 	va_end(ap);
 	exit(EXIT_FAILURE);
 }
@@ -598,7 +571,7 @@ resizewindow(void)
 }
 
 unsigned int
-tokenize(char *pat, char **tok)
+toke(char *pat, char **tok)
 {
 	unsigned int i = 0;
 	char tmp[4096] = {0};
@@ -613,7 +586,7 @@ tokenize(char *pat, char **tok)
 
 void
 match(char *pattern) {
-	unsigned int plen, tokencnt = 0;
+	unsigned int j, plen, tokencnt = 0;
 	char append = 0;
 	Item *i, *itemend, *lexact, *lprefix, *lsubstr, *exactend, *prefixend, *substrend;
 
@@ -623,12 +596,12 @@ match(char *pattern) {
 	if(!xmms)
 		tokens[(tokencnt = 1)-1] = pattern;
 	else
-		if(!(tokencnt = tokenize(pattern, tokens)))
+		if(!(tokencnt = toke(pattern, tokens)))
 			tokens[(tokencnt = 1)-1] = "";
 
 	item = lexact = lprefix = lsubstr = itemend = exactend = prefixend = substrend = NULL;
 	for(i = allitems; i; i = i->next) {
-		for(int j = 0; j < tokencnt; ++j) {
+		for(j = 0; j < tokencnt; ++j) {
 			plen = strlen(tokens[j]);
 			if(!fstrncmp(tokens[j], i->text, plen + 1))
 				append = !append || append > 1 ? 1 : append;
@@ -672,28 +645,24 @@ match(char *pattern) {
 	curr = prev = next = sel = item;
 	calcoffsets();
 	resizewindow();
-	snprintf(hitstxt, sizeof(hitstxt), "(%d)", hits);
+	snprint(hitstxt, sizeof(hitstxt), "(%d)", hits);
 	hits = 0;
 }
 
 void
 readstdin(void) {
-	char *p, buf[1024];
+	Biobuf* buf;
+	char *p, *line;
 	unsigned int len = 0, max = 0;
 	Item *i, *new;
 	Shortcut *sc;
 	KeySym ksym;
 
 	i = 0;
-	while(fgets(buf, sizeof buf, stdin)) {
-		len = strlen(buf);
-		if(buf[len - 1] == '\n')
-		{
-			buf[len - 1] = 0;
-			len--;
-		}
-		if(!(p = strdup(buf)))
-			eprint("fatal: could not strdup() %u bytes\n", strlen(buf));
+	buf = Bfdopen(0, OREAD);
+	while((line = Brdstr(buf, '\n', '\0'))) {
+		len = Blinelen(buf);
+		p = line;	
 		if(max < len) {
 			maxname = p;
 			max = len;
@@ -708,13 +677,13 @@ readstdin(void) {
 			i->next = new;
 		i = new;
 		/* shortcut? */
-		p = find_shortcut_string(buf, len);
+		p = find_shortcut_string(line, len);
 		if(!p)
 			continue;
 		p++;
 		ksym = XStringToKeysym(*p == '^' ? p+1 : p);
 		if(ksym == NoSymbol) {
-			fprintf(stderr, "Invalid shortcut string: %s\n", p);
+			fprint(2, "Invalid shortcut string: %s\n", p);
 			continue;
 		}
 		if(!(sc = malloc(sizeof(Shortcut))))
@@ -727,6 +696,7 @@ readstdin(void) {
 			sc->next = shortcuts;
 		shortcuts = sc;	
 	}
+	Bterm(buf);
 }
 
 void
@@ -798,8 +768,7 @@ selected(const char *s) {
 		}
 	}
 	else {
-		fprintf(stdout, "%s", s);
-		fflush(stdout);
+		fprint(1, "%s", s);
 		running = False;
 	}
 }
@@ -975,7 +944,7 @@ main(int argc, char *argv[]) {
 
 	}
 	if(!setlocale(LC_CTYPE, "") || !XSupportsLocale())
-		fprintf(stderr, "warning: no locale support\n");
+		fprint(2, "warning: no locale support\n");
 	if(!(dpy = XOpenDisplay(NULL)))
 		eprint("vmenu: cannot open display\n");
 	screen = DefaultScreen(dpy);
