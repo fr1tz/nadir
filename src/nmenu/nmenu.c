@@ -306,7 +306,6 @@ find_shortcut_string(char *str, int strlen)
 	p = str + strlen - 1;
 	if(*p != '\\')
 		return NULL;	
-	*p = '\0';
 	while(--p >= str && *p != '\\');
 	if(p == str)
 		return NULL;
@@ -652,7 +651,7 @@ match(char *pattern) {
 void
 readstdin(void) {
 	Biobuf* buf;
-	char *p, *line;
+	char *p, *line, tmp[sizeof(text)];
 	unsigned int len = 0, max = 0;
 	Item *i, *new;
 	Shortcut *sc;
@@ -660,7 +659,7 @@ readstdin(void) {
 
 	i = 0;
 	buf = Bfdopen(0, OREAD);
-	while((line = Brdstr(buf, '\n', '\0'))) {
+	while((line = Brdstr(buf, '\n', 1))) {
 		len = Blinelen(buf);
 		p = line;	
 		if(max < len) {
@@ -681,14 +680,17 @@ readstdin(void) {
 		if(!p)
 			continue;
 		p++;
-		ksym = XStringToKeysym(*p == '^' ? p+1 : p);
+		len = len - (p-line);
+		memcpy(tmp, p, len);
+		tmp[len-1] = '\0';
+		ksym = XStringToKeysym(*tmp == '^' ? tmp+1 : tmp);
 		if(ksym == NoSymbol) {
 			fprint(2, "Invalid shortcut string: %s\n", p);
 			continue;
 		}
 		if(!(sc = malloc(sizeof(Shortcut))))
 			eprint("fatal: could not malloc() %u bytes\n", sizeof(Shortcut));
-		sc->ctrl = (*p == '^');
+		sc->ctrl = (*tmp == '^');
 		sc->key = ksym;
 		sc->item = new;
 		sc->next = NULL;
