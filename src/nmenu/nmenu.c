@@ -377,7 +377,7 @@ initfont(const char *fontstr) {
 void
 kpress(XKeyEvent * e) {
 	char buf[32], stor[sizeof text];
-	int i, num;
+	int i, num, skipping;
 	unsigned int len;
 	KeySym ksym;
 	Shortcut* sc;
@@ -443,9 +443,14 @@ kpress(XKeyEvent * e) {
 		case XK_W:
 			if(len) {
 				strcpy(stor, text + cursorpos);
-				i = cursorpos - 1;
-				while(i >= 0 && text[i] == ' ') i--;
-				while(i >= 0 && text[i] != ' ') i--;
+				skipping = 1; i = cursorpos - 1;
+				while(i >= 0) {
+					if(skipping && isalnum(text[i]))
+						skipping = 0;
+					else if(!skipping && !isalnum(text[i]))
+						break;
+					--i;
+				}
 				cursorpos = i + 1;
 				strcpy(text + cursorpos, stor);
 				match(text);
