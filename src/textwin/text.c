@@ -1399,10 +1399,10 @@ textselect3(Text *t, uint *q0, uint *q1)
 	while(buts = mousectl->m.buttons)
 	{
 		if(buts & 16) {
-			texttype(t, Kpgdown);
+			texttype(t, Kdown);
 		}
 		else if(buts & 8) {
-			texttype(t, Kpgup);
+			texttype(t, Kup);
 		}
 		readmouse(mousectl);
 	}
